@@ -1,0 +1,6 @@
+beautifulsoup4
+python-dotenv
+requests
+requests-toolbelt
+requests-unixsocket
+selenium
