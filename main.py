@@ -7,33 +7,34 @@ import os
 from os.path import join, dirname
 from dotenv import load_dotenv
 from time import sleep
-
+from datetime import datetime, timezone, timedelta
 
 class Selenium:
-    posts = []
-
-    def __init__(self, url1, url2, ID, PASS):
+    def __init__(self, url1, access_url):
+        self.posts = []
+        self.url1 = url1
+        self.access_url = access_url
+        
         driver_path = '/app/.chromedriver/bin/chromedriver'
         options = webdriver.ChromeOptions()
         options.add_argument('--headless')
 
         driver = webdriver.Chrome(options=options, executable_path=driver_path)
+        self.driver = driver
 
+    def get_posts(self, url2, ID, PASS):
         # Basic Authentication
-        driver.get(url1)
+        self.driver.get(url1)
 
         # Single Sign On
-        driver.find_elements(By.ID, "edit-name")[0].send_keys(ID)
-        driver.find_elements(By.ID, "edit-pass")[0].send_keys(PASS)
-        driver.find_elements(By.ID, 'edit-submit')[0].click()
+        self.driver.find_elements(By.ID, "edit-name")[0].send_keys(ID)
+        self.driver.find_elements(By.ID, "edit-pass")[0].send_keys(PASS)
+        self.driver.find_elements(By.ID, 'edit-submit')[0].click()
         
-        # driver.find_element_by_id("edit-name").send_keys(ID)
-        # driver.find_element_by_id("edit-pass").send_keys(PASS)
-        # driver.find_element_by_id('edit-submit').click()
 
         # Get URL for scraping
-        driver.get(url2)
-        html = driver.page_source.encode('utf-8')
+        self.driver.get(url2)
+        html = self.driver.page_source.encode('utf-8')
         soup = BeautifulSoup(html, "html.parser")
         table = soup.findAll(
             "table", {
@@ -49,8 +50,29 @@ class Selenium:
                 post[6] = True
             print(post)
             self.posts.append(post)
-        driver.quit()
+        # self.driver.quit()
+        return self.posts
 
+    def get_post_message(self, url_node, format_to_slack=True):
+        url_node_with_ba = self.url1 + url_node
+        self.url_node = self.access_url+url_node
+        self.url_node_with_ba = url_node_with_ba
+        self.driver.get(url_node_with_ba)
+        html = self.driver.page_source.encode('utf-8')
+        soup = BeautifulSoup(html, "html.parser")
+        title = soup.find('h2', class_='content-title').get_text()
+        content = soup.find("div", class_="node").get_text()
+        
+        if format_to_slack:
+            thread_message = self.formatting_to_slack(title, content)
+            return thread_message
+        else:
+            return title +"\n"+ content + "\n" + self.url_node
+    
+    def formatting_to_slack(self, text, content):
+        return "------------------------------\n\n"+"*"+text +"*"+ "\n" + content + "\n" + self.url_node
+        
+        
 
 class SlackDriver:
 
@@ -67,7 +89,17 @@ class SlackDriver:
                           headers=self._headers,
                           params=params)
         print("return ", r.json())
+        return r.json()
+    
+    def send_message_to_chile_thread(self, message, parent_ts):
+        params = {"channel": self._channel, "text": message, "thread_ts": parent_ts}
+        slack_url = 'https://slack.com/api/chat.postMessage'
 
+        r = requests.post(slack_url,
+                          headers=self._headers,
+                          params=params)
+        print("return ", r.json())
+    
 
 class Deepl:
     def __init__(self, url, key, target_lang):
@@ -86,8 +118,11 @@ class Deepl:
         print(res)
         return res["translations"][0]["text"]
 
-
 if __name__ == '__main__':
+    #  JSTでAM 9:00から9:15の間であれば実行
+    if datetime.now(timezone(timedelta(hours=+9), 'JST')).hour != 9 or datetime.now(timezone(timedelta(hours=+9), 'JST')).minute > 15:
+        exit()
+        
     # load env
     dotenv_path = join(dirname(__file__), '.env')
     load_dotenv(dotenv_path)
@@ -100,7 +135,8 @@ if __name__ == '__main__':
     ID = os.environ.get("ID")
     PASS = os.environ.get("PASS")
 
-    posts = Selenium(url1, url2, ID, PASS).posts
+    selenium_driver = Selenium(url1, access_url)
+    posts = selenium_driver.get_posts(url2, ID, PASS)
 
     # slack setting
     token = os.environ.get("SLACKTOKEN")
@@ -108,23 +144,20 @@ if __name__ == '__main__':
     slack = SlackDriver(token, channel)
 
     # deepl setting
-    deepl_url = os.environ.get("DEEPLURL")
-    deepl_key = os.environ.get("DEEPLKEY")
-    target_lang = "EN"
-    deepl = Deepl(deepl_url, deepl_key, target_lang)
+    # deepl_url = os.environ.get("DEEPLURL")
+    # deepl_key = os.environ.get("DEEPLKEY")
+    # target_lang = "EN"
+    # deepl = Deepl(deepl_url, deepl_key, target_lang)
 
     for post in posts:
         split = post[4].split(" ")
         print(split, post)
-        # if int(split[0]) == 1 and split[1] == "day":
-        if True:
-            post_en = deepl.translate(post[1])  # deepl
-            message = "-------------------\n"
-            if post[6]:
-                message += "[`New`] |"
-            message += post[1].replace("【", "【 *").replace("】", "* 】")
-            message += "\n[*EN*] " + post_en + "\n"
-            message += "<" + access_url + post[5] + ">"
-            # slack.send_message(message)  # Post to Slack
+        # 1日前のもののみを投稿
+        if int(split[0]) == 1 and split[1] == "day":
+        
+            message_thread = selenium_driver.get_post_message(post[5][1:])
+            slack.send_message(message_thread)
+            
             print("posted.")
-            sleep(3)
+            sleep(1)
+        
