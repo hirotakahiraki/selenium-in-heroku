@@ -1,5 +1,6 @@
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
 from bs4 import BeautifulSoup
 import requests
 import os
@@ -7,28 +8,36 @@ from os.path import join, dirname
 from dotenv import load_dotenv
 from time import sleep
 
+
 class Selenium:
     posts = []
+
     def __init__(self, url1, url2, ID, PASS):
         driver_path = '/app/.chromedriver/bin/chromedriver'
         options = webdriver.ChromeOptions()
         options.add_argument('--headless')
-    
+
         driver = webdriver.Chrome(options=options, executable_path=driver_path)
 
         # Basic Authentication
         driver.get(url1)
 
         # Single Sign On
-        driver.find_element_by_id("edit-name").send_keys(ID)
-        driver.find_element_by_id("edit-pass").send_keys(PASS)
-        driver.find_element_by_id('edit-submit').click()
+        driver.find_elements(By.ID, "edit-name")[0].send_keys(ID)
+        driver.find_elements(By.ID, "edit-pass")[0].send_keys(PASS)
+        driver.find_elements(By.ID, 'edit-submit')[0].click()
         
+        # driver.find_element_by_id("edit-name").send_keys(ID)
+        # driver.find_element_by_id("edit-pass").send_keys(PASS)
+        # driver.find_element_by_id('edit-submit').click()
+
         # Get URL for scraping
         driver.get(url2)
         html = driver.page_source.encode('utf-8')
         soup = BeautifulSoup(html, "html.parser")
-        table = soup.findAll("table", {"class":"sticky-enabled sticky-table"})[0]
+        table = soup.findAll(
+            "table", {
+                "class": "sticky-enabled sticky-table"})[0]
         tbody = table.find("tbody")
         trs = tbody.find_all("tr")
         for tr in trs:
@@ -41,6 +50,7 @@ class Selenium:
             print(post)
             self.posts.append(post)
         driver.quit()
+
 
 class SlackDriver:
 
@@ -58,28 +68,30 @@ class SlackDriver:
                           params=params)
         print("return ", r.json())
 
+
 class Deepl:
     def __init__(self, url, key, target_lang):
         self.url = url
         self.auth_key = key
         self.target_lang = target_lang
-    
+
     def translate(self, text):
-        
+
         params = {
-            "auth_key":self.auth_key,
+            "auth_key": self.auth_key,
             "text": text,
-            "target_lang":self.target_lang
+            "target_lang": self.target_lang
         }
         res = requests.post(self.url, params=params).json()
         print(res)
         return res["translations"][0]["text"]
 
+
 if __name__ == '__main__':
     # load env
     dotenv_path = join(dirname(__file__), '.env')
     load_dotenv(dotenv_path)
-    
+
     # selenium
     access_url = os.environ.get("ACCESS_URL")
 
@@ -100,16 +112,19 @@ if __name__ == '__main__':
     deepl_key = os.environ.get("DEEPLKEY")
     target_lang = "EN"
     deepl = Deepl(deepl_url, deepl_key, target_lang)
-    
+
     for post in posts:
         split = post[4].split(" ")
-        if int(split[0]) == 1 and split[1]=="day" :
-            post_en = deepl.translate(post[1]) # deepl 
+        print(split, post)
+        # if int(split[0]) == 1 and split[1] == "day":
+        if True:
+            post_en = deepl.translate(post[1])  # deepl
             message = "-------------------\n"
             if post[6]:
                 message += "[`New`] |"
-            message += post[1].replace("【","【 *").replace("】","* 】")
+            message += post[1].replace("【", "【 *").replace("】", "* 】")
             message += "\n[*EN*] " + post_en + "\n"
-            message += "<" + access_url+post[5] + ">"
-            slack.send_message(message) # Post to Slack
+            message += "<" + access_url + post[5] + ">"
+            # slack.send_message(message)  # Post to Slack
+            print("posted.")
             sleep(3)
